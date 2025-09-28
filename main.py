@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from quiz import get_question, check_answer
+from quiz import get_data, init_question_pool, get_next_question, check_answer
 
 # Load env variables
 load_dotenv()
@@ -32,25 +32,51 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
 async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    word, word_type, reply_markup = get_question(context)
-    await update.message.reply_text(
-        f"❓ What does this mean?\n\n👉 *{word}* ({word_type})",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
-    )
+    """Start a quiz for this user."""
+    data = get_data()
+    init_question_pool(context, data)
+
+    message_text, reply_markup = get_next_question(context)
+    await update.message.reply_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    choice = query.data
+    choice_label = query.data
+    word = context.user_data.get("word")
 
-    is_correct, correct = check_answer(choice, context)
+    # Handle stop quiz
+    if choice_label == "STOP":
+        context.user_data["active_quiz"] = False
+        score = context.user_data.get("score", 0)
+        total = context.user_data.get("pool_index", 0)
+        await query.edit_message_text(
+            f"🛑 Quiz stopped.\nYour score so far: {score}/{total}",
+            parse_mode="Markdown"
+        )
+        return
 
+    # Handle normal answer
+    is_correct, correct = check_answer(choice_label, context)
     if is_correct:
-        await query.edit_message_text(f"✅ Correct!\n\n{choice}")
+        context.user_data["score"] += 1
+        feedback = f"✅ Correct!\n\n👉 *{word}*\nMeaning: {correct}"
     else:
-        await query.edit_message_text(f"❌ Wrong!\n\nCorrect answer: {correct}")
+        feedback = f"❌ Wrong!\n\n👉 *{word}*\nCorrect meaning: {correct}"
 
+    # Next or finish
+    message_text, reply_markup = get_next_question(context)
+    if message_text is None:
+        context.user_data["active_quiz"] = False
+        score = context.user_data.get("score", 0)
+        total = context.user_data.get("pool_index", 0)
+        await query.edit_message_text(
+            f"{feedback}\n\n🏁 Quiz finished!\nYour score: {score}/{total}",
+            parse_mode="Markdown"
+        )
+    else:
+        await query.edit_message_text(feedback, parse_mode="Markdown")
+        await query.message.reply_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
 # --- Main ---
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
