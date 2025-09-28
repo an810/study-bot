@@ -20,6 +20,12 @@ def get_data():
     now = time.time()
     if CACHE["data"] is None or now - CACHE["last_update"] > REFRESH_INTERVAL:
         df = pd.read_csv(SHEET_URL)
+        # Remove rows where essential fields are missing
+        df = df.dropna(subset=["Phrasal verb/ Vocab", "Meaning", "Type"])
+
+        # Fill optional empty cells (Example, Source) with empty string
+        df = df.fillna("")
+        
         CACHE["data"] = df.to_dict("records")
         CACHE["last_update"] = now
     return CACHE["data"]
